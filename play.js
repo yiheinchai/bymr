@@ -192,8 +192,8 @@
     autoCache: params.get("autocache") !== "0",
     logLevel: params.get("log") || "error",
   };
-  // Ruffle picks WebGPU where available, then wgpu on WebGL. Its plain "webgl" renderer is
-  // cheaper per draw but has no filters or bitmap caching, so it isn't used unless asked for.
+  // Ruffle tries wgpu on WebGL first, then WebGPU. Its plain "webgl" renderer is cheaper per
+  // draw but has no filters or bitmap caching, so it isn't used unless asked for.
   const FALLBACK_RENDERER = "wgpu-webgl";
   const renderer = params.get("renderer") || localStorage.getItem("bymr.renderer");
   if (renderer) config.preferredRenderer = renderer;
