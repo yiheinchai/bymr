@@ -195,6 +195,16 @@
   const player = ruffle.createPlayer();
   stage.appendChild(player);
 
+  // Typing on a phone goes through a hidden text box that Ruffle focuses to raise the keyboard.
+  // Ruffle hides it above the page, and iOS closes the keyboard straight away for a text box
+  // off the screen. Keep it on the screen, still invisible, and at 16px so iOS doesn't zoom.
+  const keyboardStyle = document.createElement("style");
+  keyboardStyle.textContent = `#virtual-keyboard {
+    position: fixed; top: 0; left: 0; width: 1px; height: 1px;
+    opacity: 0; font-size: 16px; pointer-events: none;
+  }`;
+  player.shadowRoot.appendChild(keyboardStyle);
+
   const config = {
     autoplay: "on",
     unmuteOverlay: "hidden",
