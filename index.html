@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=overlays-content"
+    />
+    <meta name="theme-color" content="#1e2229" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="BYM Refitted" />
+    <meta name="description" content="Backyard Monsters Refitted, playable in the browser." />
+    <title>Backyard Monsters Refitted</title>
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" type="image/png" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+    <link rel="stylesheet" href="play.css" />
+  </head>
+  <body>
+    <main id="viewport">
+      <div id="stage"></div>
+    </main>
+
+    <div id="boot" role="status" aria-live="polite">
+      <img src="icons/icon-512.png" alt="" width="160" height="160" />
+      <p id="boot-text">Loading…</p>
+    </div>
+
+    <div id="rotate" hidden>
+      <p>Turn your device sideways to play.</p>
+      <button type="button" id="rotate-dismiss">Play anyway</button>
+    </div>
+
+    <output id="fps" hidden></output>
+
+    <script>
+      // This copy is a static site, so it plays on the official Backyard Monsters Refitted servers.
+      window.BYMR_CONFIG = {
+        serverUrl: "https://server.bymrefitted.com/",
+        cdnUrl: "https://cdn.bymrefitted.com/",
+      };
+    </script>
+    <script src="ruffle/ruffle.js"></script>
+    <script src="play.js"></script>
+  </body>
+</html>
