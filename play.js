@@ -12,6 +12,7 @@
  *   ?cdn=https://...     asset CDN URL (defaults to the game server)
  *   ?chat=wss://...      chat server URL (defaults to the host the game server names)
  *   ?renderer=webgl Ruffle renderer to prefer (webgpu, wgpu-webgl, webgl, canvas)
+ *   ?dpr=1          draw at most this many pixels per CSS pixel (default: the screen's own)
  *   ?logout=1       forget the saved session before starting
  */
 (() => {
@@ -50,12 +51,13 @@
 
   const dprDescriptor = Object.getOwnPropertyDescriptor(window, "devicePixelRatio");
   const nativeDpr = () => (dprDescriptor && dprDescriptor.get ? dprDescriptor.get.call(window) : 1);
+  const maxDpr = Number(params.get("dpr")) || Infinity;
   let stageScale = 1;
 
   try {
     Object.defineProperty(window, "devicePixelRatio", {
       configurable: true,
-      get: () => nativeDpr() * stageScale,
+      get: () => Math.min(nativeDpr(), maxDpr) * stageScale,
     });
   } catch {
     // Not overridable here: Ruffle renders at the CSS size instead, which is only less sharp.
