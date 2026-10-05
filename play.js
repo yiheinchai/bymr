@@ -126,6 +126,8 @@
   function chatUrl(host, port) {
     if (params.get("chat")) return params.get("chat");
     if (site.chatUrl) return site.chatUrl;
+    // A wss:// relay to a chat server that only speaks ws:// (pwa/chat-relay).
+    if (site.chatRelay) return `${site.chatRelay}?to=${encodeURIComponent(`${host}:${port}`)}`;
     const scheme = location.protocol === "https:" ? "wss" : "ws";
     return `${scheme}://${host}:${port}/`;
   }
