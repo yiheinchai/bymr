@@ -95,6 +95,31 @@
   window.clientCallWithCallback = noop;
   window.setItem = noop;
 
+  /* ------------------------------------------------------------------ *
+   * Server error messages
+   * ------------------------------------------------------------------ */
+
+  const serverUrl = params.get("server") || site.serverUrl || `${location.origin}/`;
+  const apiUrl = new URL("api/", serverUrl).href;
+
+  /**
+   * The game server answers a failed request (wrong password, account not verified, name
+   * taken) with an error status and a JSON body whose `error` the client shows. Flash in a
+   * browser, and Ruffle with it, empties URLLoader.data on an error status, so the client only
+   * had "An error occurred during login on the server." URLLoaderApi.load() reads the body on
+   * an error the same way it reads a success, so its form-encoded requests to the API get the
+   * body with a 200. Requests sent as JSON keep their status.
+   */
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (input, init) => {
+    const response = await nativeFetch(input, init);
+    if (response.ok || !(input instanceof Request) || !input.url.startsWith(apiUrl)) return response;
+    if ((input.headers.get("content-type") || "").includes("json")) return response;
+    if (!(response.headers.get("content-type") || "").includes("json")) return response;
+    const body = await response.text();
+    return new Response(body, { status: 200, headers: response.headers });
+  };
+
   /** Chat sockets, opened on behalf of com.monsters.chat.impl.ws.BrowserWebSocket. */
   const sockets = new Map();
 
@@ -215,7 +240,7 @@
         language: language(),
         // The game server and CDN default to the host serving this page. A static deployment
         // names them in window.BYMR_CONFIG instead (see pwa/README.md).
-        serverUrl: params.get("server") || site.serverUrl || `${location.origin}/`,
+        serverUrl,
         cdnUrl: params.get("cdn") || params.get("server") || site.cdnUrl || `${location.origin}/`,
       },
     })
