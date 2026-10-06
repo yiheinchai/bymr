@@ -3,7 +3,8 @@
  *
  * - Ruffle's hashed files (core.ruffle.<hash>.js, <hash>.wasm) never change: cache first.
  * - The shell, ruffle.js and the game SWF: network first, so a new client is picked up on the
- *   next launch, falling back to the cached copy offline.
+ *   next launch, falling back to the cached copy offline. These always ask the server, because a
+ *   static host may let the browser reuse its own copy for a while (GitHub Pages: 10 minutes).
  * - Game art, sounds and language files: served from cache and refreshed in the background.
  * - Everything else (the game API) goes straight to the network.
  */
@@ -32,7 +33,7 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(SHELL_CACHE)
-      .then((cache) => cache.addAll(SHELL))
+      .then((cache) => cache.addAll(SHELL.map((path) => new Request(path, { cache: "reload" }))))
       .then(() => self.skipWaiting()),
   );
 });
@@ -73,7 +74,7 @@ async function cacheFirst(request, cacheName) {
 
 async function networkFirst(request, cacheName) {
   try {
-    const response = await fetch(request);
+    const response = await fetch(request, { cache: "no-cache" });
     if (response.ok) (await caches.open(cacheName)).put(request, response.clone());
     return response;
   } catch (error) {
