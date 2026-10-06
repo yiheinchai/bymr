@@ -212,14 +212,15 @@
     const active = () => `${name(document.activeElement)}/${name(shadow.activeElement)}`;
     const log = (text) => {
       lines.push(`${((performance.now() - start) / 1000).toFixed(3)} ${text}`);
-      if (lines.length > 40) lines.shift();
+      if (lines.length > 16) lines.shift();
       box.textContent = lines.join("\n");
     };
     const caller = () =>
-      (new Error().stack || "").split("\n").slice(2, 5).map((line) => line.trim().slice(0, 60)).join(" < ");
+      (new Error().stack || "").split("\n").slice(2, 4).map((line) => line.trim().split("@")[0].slice(0, 40)).join(" < ");
 
     for (const type of ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "click"]) {
-      document.addEventListener(type, (e) => log(`${type} ${name(e.composedPath()[0])} prevented=${e.defaultPrevented}`), true);
+      // Bubbling, so defaultPrevented shows what the game's own handlers did.
+      document.addEventListener(type, (e) => log(`${type} ${name(e.composedPath()[0])} prevented=${e.defaultPrevented}`));
     }
     for (const type of ["focusin", "focusout"]) {
       document.addEventListener(type, (e) => log(`${type} ${name(e.composedPath()[0])} rel=${name(e.relatedTarget)} active=${active()}`), true);
@@ -251,6 +252,17 @@
     opacity: 0; font-size: 16px; pointer-events: none;
   }`;
   player.shadowRoot.appendChild(keyboardStyle);
+
+  // iOS still sends a tap's compatibility mousedown after Ruffle has cancelled its pointerdown,
+  // and the mousedown moves focus off the hidden text box, closing the keyboard just opened.
+  // Ruffle only listens to pointer events, so the canvas's mousedown has nothing else to do.
+  player.addEventListener(
+    "mousedown",
+    (event) => {
+      if (event.composedPath()[0] instanceof HTMLCanvasElement) event.preventDefault();
+    },
+    true,
+  );
 
   if (params.get("kbdebug") === "1") watchKeyboardFocus(player.shadowRoot);
 
