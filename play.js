@@ -13,6 +13,7 @@
  *   ?chat=wss://...      chat server URL (defaults to the host the game server names)
  *   ?renderer=webgl Ruffle renderer to prefer (webgpu, wgpu-webgl, webgl, canvas)
  *   ?dpr=1          draw at most this many pixels per CSS pixel (default: the screen's own)
+ *   ?kbdebug=1      list taps and focus changes on screen (phone keyboard problems)
  *   ?logout=1       forget the saved session before starting
  */
 (() => {
@@ -193,6 +194,50 @@
     }
   }
 
+  /**
+   * ?kbdebug=1: lists taps, focus changes, focus()/blur() calls and viewport resizes on screen,
+   * to see what closes the phone keyboard on a device without remote debugging.
+   */
+  function watchKeyboardFocus(shadow) {
+    const box = document.createElement("pre");
+    box.style.cssText =
+      "position:fixed;right:0;bottom:0;z-index:99;max-width:70vw;max-height:60vh;overflow:hidden;" +
+      "margin:0;padding:4px;font:10px/1.25 monospace;color:#9f9;background:#000c;pointer-events:none;" +
+      "white-space:pre-wrap";
+    document.body.appendChild(box);
+    const start = performance.now();
+    const lines = [];
+    const name = (node) =>
+      !node ? "-" : node === window ? "window" : node.id ? `#${node.id}` : (node.tagName || node.nodeName || "?").toLowerCase();
+    const active = () => `${name(document.activeElement)}/${name(shadow.activeElement)}`;
+    const log = (text) => {
+      lines.push(`${((performance.now() - start) / 1000).toFixed(3)} ${text}`);
+      if (lines.length > 40) lines.shift();
+      box.textContent = lines.join("\n");
+    };
+    const caller = () =>
+      (new Error().stack || "").split("\n").slice(2, 5).map((line) => line.trim().slice(0, 60)).join(" < ");
+
+    for (const type of ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "click"]) {
+      document.addEventListener(type, (e) => log(`${type} ${name(e.composedPath()[0])} prevented=${e.defaultPrevented}`), true);
+    }
+    for (const type of ["focusin", "focusout"]) {
+      document.addEventListener(type, (e) => log(`${type} ${name(e.composedPath()[0])} rel=${name(e.relatedTarget)} active=${active()}`), true);
+    }
+    for (const method of ["focus", "blur"]) {
+      const original = HTMLElement.prototype[method];
+      HTMLElement.prototype[method] = function (...args) {
+        log(`${method}() ${name(this)} by ${caller()}`);
+        return original.apply(this, args);
+      };
+    }
+    if (window.visualViewport) {
+      visualViewport.addEventListener("resize", () =>
+        log(`viewport ${Math.round(visualViewport.width)}x${Math.round(visualViewport.height)} active=${active()}`));
+    }
+    addEventListener("blur", () => log(`window blur active=${active()}`));
+  }
+
   const ruffle = window.RufflePlayer.newest();
   const player = ruffle.createPlayer();
   stage.appendChild(player);
@@ -206,6 +251,8 @@
     opacity: 0; font-size: 16px; pointer-events: none;
   }`;
   player.shadowRoot.appendChild(keyboardStyle);
+
+  if (params.get("kbdebug") === "1") watchKeyboardFocus(player.shadowRoot);
 
   const config = {
     autoplay: "on",
