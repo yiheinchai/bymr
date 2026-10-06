@@ -3,8 +3,7 @@
  *
  * - Ruffle's hashed files (core.ruffle.<hash>.js, <hash>.wasm) never change: cache first.
  * - The shell, ruffle.js and the game SWF: network first, so a new client is picked up on the
- *   next launch, falling back to the cached copy offline. These always ask the server, because a
- *   static host may let the browser reuse its own copy for a while (GitHub Pages: 10 minutes).
+ *   next launch, falling back to the cached copy offline or when a download breaks off.
  * - Game art, sounds and language files: served from cache and refreshed in the background.
  * - Everything else (the game API) goes straight to the network.
  */
@@ -72,13 +71,33 @@ async function cacheFirst(request, cacheName) {
   return response;
 }
 
+/**
+ * Asks the server whether the saved copy is still current (by its ETag), so an unchanged file
+ * isn't downloaded again, and reads a new one completely before using it. A download cut off
+ * part way (a phone losing signal, or iOS pausing the page) then falls back to the saved copy,
+ * instead of reaching Ruffle as a broken SWF ("Not a valid swf").
+ */
 async function networkFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+  const key = new URL(request.url);
+  key.search = "";
+  const cached = await cache.match(key.href);
   try {
-    const response = await fetch(request, { cache: "no-cache" });
-    if (response.ok) (await caches.open(cacheName)).put(request, response.clone());
-    return response;
+    const headers = new Headers(request.headers);
+    const etag = cached && cached.headers.get("ETag");
+    if (etag) headers.set("If-None-Match", etag);
+    // no-store: the browser's own cache may hold an older copy (GitHub Pages allows 10 minutes).
+    const response = await fetch(request.url, { headers, cache: "no-store", credentials: "same-origin" });
+    if (response.status === 304 && cached) return cached;
+    if (!response.ok) return cached || response;
+    const complete = new Response(await response.arrayBuffer(), {
+      status: response.status,
+      statusText: response.statusText,
+      headers: response.headers,
+    });
+    await cache.put(key.href, complete.clone());
+    return complete;
   } catch (error) {
-    const cached = await caches.match(request, { ignoreSearch: true });
     if (cached) return cached;
     throw error;
   }
