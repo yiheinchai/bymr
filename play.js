@@ -104,6 +104,7 @@
 
   const serverUrl = params.get("server") || site.serverUrl || `${location.origin}/`;
   const apiUrl = new URL("api/", serverUrl).href;
+  const initUrl = new URL("init", serverUrl).href;
 
   /**
    * The game server answers a failed request (wrong password, account not verified, name
@@ -116,7 +117,9 @@
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const response = await nativeFetch(input, init);
-    if (response.ok || !(input instanceof Request) || !input.url.startsWith(apiUrl)) return response;
+    if (response.ok || !(input instanceof Request)) return response;
+    // The start-up check (init) answers an outdated client with an error status too.
+    if (!input.url.startsWith(apiUrl) && input.url !== initUrl) return response;
     if ((input.headers.get("content-type") || "").includes("json")) return response;
     if (!(response.headers.get("content-type") || "").includes("json")) return response;
     const body = await response.text();

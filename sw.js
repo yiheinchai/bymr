@@ -90,10 +90,14 @@ async function networkFirst(request, cacheName) {
     const response = await fetch(request.url, { headers, cache: "no-store", credentials: "same-origin" });
     if (response.status === 304 && cached) return cached;
     if (!response.ok) return cached || response;
+    // The body is already decompressed, so the server's encoding and length no longer apply.
+    const responseHeaders = new Headers(response.headers);
+    responseHeaders.delete("Content-Encoding");
+    responseHeaders.delete("Content-Length");
     const complete = new Response(await response.arrayBuffer(), {
       status: response.status,
       statusText: response.statusText,
-      headers: response.headers,
+      headers: responseHeaders,
     });
     await cache.put(key.href, complete.clone());
     return complete;
