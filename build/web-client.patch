@@ -1,0 +1,1146 @@
+diff --git a/client/scripts/BFOUNDATION.as b/client/scripts/BFOUNDATION.as
+index 53afa9e2..da76a6cf 100644
+--- a/client/scripts/BFOUNDATION.as
++++ b/client/scripts/BFOUNDATION.as
+@@ -3,6 +3,7 @@ package {
+     import com.monsters.GameObject;
+     import com.monsters.configs.BYMConfig;
+     import com.monsters.configs.BYMDevConfig;
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.debug.Console;
+     import com.monsters.display.BuildingAssetContainer;
+     import com.monsters.display.BuildingOverlay;
+@@ -1578,6 +1579,22 @@ package {
+             }
+         }
+ 
++        /**
++         * With a mouse a building being placed or moved is always under the pointer, but a tap
++         * jumps there and the building only follows on the next frame, so the tap would be
++         * checked where the building was. Moves it to the tap first.
++         *
++         * @return true if the tap moved the building onto a spot where it can't go. It then stays
++         * there, shown as blocked, until the player taps somewhere else; tapping the same spot
++         * again cancels it (or, when moving, puts it back) as before.
++         */
++        private function FollowTap():Boolean {
++            var oldX:Number = _mc.x;
++            var oldY:Number = _mc.y;
++            this.FollowMouseB();
++            return (_mc.x != oldX || _mc.y != oldY) && BASE.BuildBlockers(this, this._class == "decoration") != "";
++        }
++
+         public function Cancel():void {
+             if (GLOBAL._newBuilding === this) {
+                 this.clear();
+@@ -1632,6 +1649,9 @@ package {
+             var e:MouseEvent = param1;
+             this.Description();
+             if (!MAP._dragged) {
++                if (WebPlatform.isWeb && this.FollowTap()) {
++                    return;
++                }
+                 if (BASE.BuildBlockers(this, this._class == "decoration") != "") {
+                     this.Cancel();
+                     return;
+@@ -2773,6 +2793,11 @@ package {
+                 }
+                 this._oldPosition = new Point(_mc.x, _mc.y);
+                 this._mouseOffset = new Point(MAP._GROUND.mouseX - _mc.x, MAP._GROUND.mouseY - _mc.y);
++                if (WebPlatform.isWeb) {
++                    // The move starts from a menu button, so on a touch screen the building would
++                    // land offset from every tap; put it where the player taps, like a new one.
++                    this._mouseOffset = new Point(0, 0);
++                }
+             }
+             catch (e:Error) {
+                 LOGGER.Log("err", "BFOUNDATION.StartMove: " + e.getStackTrace());
+@@ -2784,6 +2809,10 @@ package {
+             if (this._mouseClicked) {
+                 this._mouseClicked = false;
+                 if (!MAP._dragged) {
++                    if (WebPlatform.isWeb && this.FollowTap()) {
++                        this._mouseClicked = true;
++                        return;
++                    }
+                     MAP._GROUND.removeEventListener(MouseEvent.MOUSE_UP, this.StopMove);
+                     _mc.mouseEnabled = true;
+                     this.StopMoveB();
+diff --git a/client/scripts/DROPZONE.as b/client/scripts/DROPZONE.as
+index 2273714b..4caee320 100644
+--- a/client/scripts/DROPZONE.as
++++ b/client/scripts/DROPZONE.as
+@@ -1,4 +1,5 @@
+ package {
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.effects.ResourceBombs;
+     import flash.events.*;
+     import flash.geom.Point;
+@@ -33,7 +34,14 @@ package {
+             super();
+             this._size = param1;
+             this._dropTarget = param2;
+-            ring1.addEventListener(MouseEvent.MOUSE_UP, this.Place);
++            if (WebPlatform.isWeb) {
++                // A tap only moves the ring under the finger on the next frame, so it would miss
++                // the ring; take taps anywhere on the map instead.
++                MAP._GROUND.addEventListener(MouseEvent.MOUSE_UP, this.Tap);
++            }
++            else {
++                ring1.addEventListener(MouseEvent.MOUSE_UP, this.Place);
++            }
+             ring1.addEventListener(MouseEvent.MOUSE_DOWN, MAP.Click);
+             ring1.mouseEnabled = true;
+             ring1.buttonMode = true;
+@@ -55,6 +63,11 @@ package {
+             }
+         }
+ 
++        private function Tap(param1:MouseEvent):void {
++            this.Follow();
++            this.Place(param1);
++        }
++
+         public function Follow(param1:Event = null):void {
+             if (MAP._GROUND) {
+                 x = MAP._GROUND.mouseX;
+@@ -116,6 +129,9 @@ package {
+         public function Destroy():void {
+             this.Clear();
+             removeEventListener(Event.ENTER_FRAME, this.Follow);
++            if (MAP._GROUND) {
++                MAP._GROUND.removeEventListener(MouseEvent.MOUSE_UP, this.Tap);
++            }
+         }
+ 
+         public function get isOverTarget():Boolean {
+diff --git a/client/scripts/EFFECTS.as b/client/scripts/EFFECTS.as
+index 0ce224d2..c49ed3ab 100644
+--- a/client/scripts/EFFECTS.as
++++ b/client/scripts/EFFECTS.as
+@@ -2,6 +2,8 @@ package {
+ 
+     import com.monsters.effects.LASERS;
+     import com.monsters.effects.ResourceBombs;
++    import com.monsters.effects.StampCache;
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.effects.particles.Particles;
+     import flash.display.BitmapData;
+     import flash.display.DisplayObject;
+@@ -78,6 +80,8 @@ package {
+             GIBLETS.Create(new Point(param2, param3 + 3), 0.8, 75, _loc4_);
+         }
+ 
++        private static var _stampsPrepared:Boolean = false;
++
+         public static function SplatParticle(param1:Number, param2:Number, param3:Number, param4:Number, param5:Number):void {
+             var _loc7_:int = 0;
+             var _loc6_:ParticleSplat = MAP._EFFECTS.addChild(new ParticleSplat()) as ParticleSplat;
+@@ -99,6 +103,39 @@ package {
+             ++_itemCount;
+         }
+ 
++        /**
++         * Rasterises every splat stamp in the browser build while the yard loads, so that a fight
++         * never waits for a GPU readback (see StampCache).
++         */
++        public static function PrepareStamps():void {
++            var keys:Array = null;
++            var sheet:BitmapData = null;
++            var frame:int = 0;
++            var step:int = 0;
++            var scale:Number = NaN;
++            if (!WebPlatform.isWeb || _stampsPrepared) {
++                return;
++            }
++            _stampsPrepared = true;
++            // Splats grow from 30/32 until they settle, up to about 2.3; replays use 1 to 2.
++            keys = [];
++            sheet = new BitmapData(1000, 1200, true, 0);
++            frame = 1;
++            while (frame <= 5) {
++                _splats[0].gotoAndStop(frame);
++                step = 1;
++                while (step <= 23) {
++                    scale = StampCache.Quantise(step / 10, 0.1);
++                    sheet.draw(_splats[0], new Matrix(scale, 0, 0, scale, keys.length % 10 * 100 + 50, int(keys.length / 10) * 100 + 50));
++                    keys.push("s" + frame + "@" + scale);
++                    step++;
++                }
++                frame++;
++            }
++            StampCache.AddSheet(sheet, keys, 100, 100);
++            Particles.PrepareStamps();
++        }
++
+         public static function Scorch(param1:Point, param2:int = 0):void {
+             SnapShotB(param1.x, param1.y, "b" + param2, 0);
+             Push([param1.x, param1.y, "b" + param2, 0]);
+@@ -232,7 +269,25 @@ package {
+                 if (param5 == 0) {
+                     param5 = 1 + Math.random() * 10 / 10;
+                 }
+-                if (param3.substr(0, 1) == "s") {
++                if (param3.substr(0, 1) == "s" && WebPlatform.isWeb) {
++                    // Stamp a cached rasterisation; see StampCache.
++                    _loc9_ = 100;
++                    _loc10_ = 100;
++                    param5 = StampCache.Quantise(Math.max(0.1, Math.min(param5, 2.3)), 0.1);
++                    _loc7_.scale(param5, param5);
++                    _loc7_.tx = 50;
++                    _loc7_.ty = 50;
++                    _loc8_ = _splats[0];
++                    if (!StampCache.Has(param3 + "@" + param5)) {
++                        _loc8_.gotoAndStop(param3.substr(1, 1));
++                    }
++                    _loc6_ = StampCache.Get(param3 + "@" + param5, 100, 100, _loc8_, _loc7_);
++                    if (param4 > 0) {
++                        MAP.effectsBMD.draw(_loc6_, new Matrix(1, 0, 0, 1, param1 + MAP.effectsBMD.width * 0.5 - 50, param2 + MAP.effectsBMD.height * 0.5 - 50), new ColorTransform(1, 1, 1, 1 - param4 / _effectDuration));
++                        return;
++                    }
++                }
++                else if (param3.substr(0, 1) == "s") {
+                     _loc9_ = 100;
+                     _loc10_ = 100;
+                     _loc6_ = new BitmapData(100, 100, true, 0);
+diff --git a/client/scripts/GAME.as b/client/scripts/GAME.as
+index 68faf734..5a63cafe 100644
+--- a/client/scripts/GAME.as
++++ b/client/scripts/GAME.as
+@@ -12,6 +12,7 @@ package {
+     import flash.system.Security;
+     import flash.net.SharedObject;
+     import com.monsters.external_interface.ExternalInterfaceManager;
++    import com.monsters.configs.WebPlatform;
+     public class GAME extends Sprite {
+ 
+         public static var _instance:GAME;
+@@ -35,6 +36,8 @@ package {
+         public function GAME() {
+             var urls:Object = null;
+ 
++            WebPlatform.init(loaderInfo.parameters);
++
+             // Override server URL if provided as a flash var
+             var flashVarServerUrl:* = loaderInfo.parameters["serverUrl"];
+ 
+@@ -42,13 +45,21 @@ package {
+                 GLOBAL.serverUrl = String(flashVarServerUrl);
+             }
+ 
++            // Likewise for the CDN, so the browser build can be served from any host
++            var flashVarCdnUrl:* = loaderInfo.parameters["cdnUrl"];
++
++            if (flashVarCdnUrl != undefined && flashVarCdnUrl != "") {
++                GLOBAL.cdnUrl = String(flashVarCdnUrl);
++            }
++
+             var serverUrl:String = GLOBAL.serverUrl;
+             var apiVersionSuffix:String = GLOBAL.apiVersionSuffix + "/";
+             var cdnUrl:String = GLOBAL.cdnUrl;
+             super();
+             _instance = this;
+             FONTS.Register();
+-            GLOBAL._local = !ExternalInterface.available;
++            // The browser build talks to its page through ExternalInterface, but plays like the launcher
++            GLOBAL._local = !ExternalInterface.available || WebPlatform.isWeb;
+             ReferencedExposedStructures.Include();
+             if (this.parent) {
+                 urls = {};
+diff --git a/client/scripts/GLOBAL.as b/client/scripts/GLOBAL.as
+index 68ada594..f5a67f3c 100644
+--- a/client/scripts/GLOBAL.as
++++ b/client/scripts/GLOBAL.as
+@@ -6,6 +6,7 @@ package {
+     import com.monsters.ai.WMBASE;
+     import com.monsters.chat.Chat;
+     import com.monsters.configs.BYMConfig;
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.debug.Console;
+     import com.monsters.display.ImageCache;
+     import com.monsters.effects.fire.Fire;
+@@ -999,6 +1000,10 @@ package {
+         }
+ 
+         public static function goFullScreen(param1:MouseEvent = null):void {
++            if (WebPlatform.isWeb) {
++                WebPlatform.toggleFullscreen();
++                return;
++            }
+             if (_ROOT.stage.displayState == StageDisplayState.NORMAL) {
+                 _ROOT.stage.displayState = StageDisplayState.FULL_SCREEN;
+                 if (GLOBAL.mode == e_BASE_MODE.ATTACK || GLOBAL.mode == e_BASE_MODE.WMATTACK) {
+diff --git a/client/scripts/LOGIN.as b/client/scripts/LOGIN.as
+index bddc22a7..a9817b94 100644
+--- a/client/scripts/LOGIN.as
++++ b/client/scripts/LOGIN.as
+@@ -2,6 +2,7 @@ package {
+     import com.auth.AuthForm;
+     import com.cc.utils.SecNum;
+     import com.monsters.configs.BYMDevConfig;
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.enums.EnumYardType;
+     import com.monsters.maproom_manager.MapRoomManager;
+     import com.monsters.player.Player;
+@@ -45,14 +46,49 @@ package {
+         }
+ 
+         public static function Login():void {
+-            if (GAME.token) {
++            if (GAME.token || hasRememberedSession()) {
+                 PLEASEWAIT.Show("Logging in...");
+                 GLOBAL.eventDispatcher.addEventListener(KEYS.LANGUAGE_FILE_LOADED, onLanguageLoaded);
+                 GLOBAL.LanguageSetup();
+             }
+             else {
+-                authForm = new AuthForm();
+-                GLOBAL._layerTop.addChild(authForm);
++                showAuthForm();
++            }
++        }
++
++        private static function showAuthForm():void {
++            authForm = new AuthForm();
++            GLOBAL._layerTop.addChild(authForm);
++        }
++
++        /**
++         * The browser build has no launcher to hold the session, so it keeps the latest
++         * session token in the SharedObject and signs back in with it on the next visit.
++         */
++        private static function hasRememberedSession():Boolean {
++            return WebPlatform.isWeb && GAME.sharedObj && Boolean(GAME.sharedObj.data.token);
++        }
++
++        private static function rememberSession(sessionToken:String):void {
++            if (!WebPlatform.isWeb || !GAME.sharedObj || !sessionToken) {
++                return;
++            }
++            try {
++                GAME.sharedObj.data.token = sessionToken;
++                GAME.sharedObj.flush();
++            }
++            catch (e:Error) {
++                LOGGER.Log("err", "Error saving session token: " + e.message);
++            }
++        }
++
++        private static function forgetSession():void {
++            try {
++                delete GAME.sharedObj.data.token;
++                GAME.sharedObj.flush();
++            }
++            catch (e:Error) {
++                LOGGER.Log("err", "Error clearing session token: " + e.message);
+             }
+         }
+ 
+@@ -69,6 +105,12 @@ package {
+             if (GLOBAL._local) {
+                 handleLoadSuccessful = function(serverData:Object):void {
+                     if (serverData.hasOwnProperty("error") && serverData.error != 0) {
++                        if (hasRememberedSession()) {
++                            forgetSession();
++                            PLEASEWAIT.Hide();
++                            showAuthForm();
++                            return;
++                        }
+                         GLOBAL.Message(serverData.error);
+                         return;
+                     }
+@@ -77,6 +119,7 @@ package {
+                         if (GLOBAL._local) {
+                             // Set token
+                             token = serverData.token;
++                            rememberSession(token);
+ 
+                             new URLLoaderApi().load(GLOBAL._apiURL + "bm/getnewmap", [["token", token]],
+                                     function(mapData:Object):void {
+@@ -91,6 +134,10 @@ package {
+                     }
+                 };
+                 handleLoadError = function(error:IOErrorEvent):void {
++                    if (hasRememberedSession() && !authForm) {
++                        PLEASEWAIT.Hide();
++                        showAuthForm();
++                    }
+                     GLOBAL._layerTop.addChild(GLOBAL.Message("An error occurred during login on the server."));
+                 };
+                 new URLLoaderApi().load(GLOBAL._apiURL + "player/getinfo", [["version", GLOBAL._version.Get()]].concat(authInfo), handleLoadSuccessful, handleLoadError);
+diff --git a/client/scripts/MAP.as b/client/scripts/MAP.as
+index f3f585d0..05197930 100644
+--- a/client/scripts/MAP.as
++++ b/client/scripts/MAP.as
+@@ -1,5 +1,6 @@
+ package {
+     import com.monsters.configs.BYMConfig;
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.input.KeyboardInputHandler;
+     import com.monsters.monsters.MonsterBase;
+     import com.monsters.rendering.RasterData;
+@@ -10,6 +11,7 @@ package {
+     import flash.display.MovieClip;
+     import flash.display.Sprite;
+     import flash.display.Stage;
++    import flash.utils.Dictionary;
+     import flash.events.*;
+     import flash.geom.*;
+     import gs.*;
+@@ -231,6 +233,7 @@ package {
+                 GLOBAL._ROOT.addEventListener(Event.RENDER, this.render);
+             }
+             Targeting.init();
++            EFFECTS.PrepareStamps();
+             _inited = true;
+         }
+ 
+@@ -393,12 +396,21 @@ package {
+             }
+         }
+ 
++        /** Half the height of each object sorted by SortDepth on the browser build, by object. */
++        private static var _sortHalfHeights:Dictionary = new Dictionary(true);
++
++        private static var _sortCount:int = 0;
++
+         public static function SortDepth(param1:Boolean = false, param2:Boolean = false):void {
+             var _loc3_:DisplayObject = null;
+             var _loc6_:int = 0;
+             if (BYMConfig.instance.RENDERER_ON) {
+                 return;
+             }
++            if (WebPlatform.isWeb) {
++                SortDepthCached();
++                return;
++            }
+             var _loc4_:Array = [];
+             var _loc5_:int = _BUILDINGTOPS.numChildren - 1;
+             while (_loc5_ >= 0) {
+@@ -420,6 +432,42 @@ package {
+             }
+         }
+ 
++        /**
++         * SortDepth for the browser build. An object's height is the size of everything drawn in
++         * it, which Ruffle measures from scratch on every read, and reading it for every building
++         * and creature every third frame was a regular hitch. Heights rarely change, so each is
++         * remeasured about once a second (a few objects per sort), and the order is checked
++         * without searching the display list for every object.
++         */
++        private static function SortDepthCached():void {
++            var child:DisplayObject = null;
++            var halfHeight:* = undefined;
++            var entries:Array = [];
++            var i:int = _BUILDINGTOPS.numChildren - 1;
++            ++_sortCount;
++            while (i >= 0) {
++                child = _BUILDINGTOPS.getChildAt(i);
++                halfHeight = _sortHalfHeights[child];
++                if (halfHeight === undefined || (_sortCount + i) % 13 == 0) {
++                    halfHeight = int(child.height * 0.5);
++                    _sortHalfHeights[child] = halfHeight;
++                }
++                entries.push({
++                            "depth": (child.y + halfHeight) * 1000 + child.x,
++                            "mc": child
++                        });
++                i--;
++            }
++            entries.sortOn("depth", Array.NUMERIC);
++            i = 0;
++            while (i < entries.length) {
++                if (_BUILDINGTOPS.getChildAt(i) != entries[i].mc) {
++                    _BUILDINGTOPS.setChildIndex(entries[i].mc, i);
++                }
++                i++;
++            }
++        }
++
+         private static function onMouseScroll(param1:MouseEvent):void {
+             GLOBAL.magnification += param1.delta * 0.05;
+         }
+diff --git a/client/scripts/SPRITES.as b/client/scripts/SPRITES.as
+index 65c087db..0c004ac6 100644
+--- a/client/scripts/SPRITES.as
++++ b/client/scripts/SPRITES.as
+@@ -124,17 +124,21 @@ package {
+             if (!GLOBAL._render) {
+                 return -1;
+             }
++            if (Boolean(_sprites[param2]) && !_sprites[param2].image) {
++                // Not loaded yet: nothing can be drawn, so ask again next time.
++                return -1;
++            }
+             if (param4 < 0) {
+                 param4 = 360 + param4;
+             }
+             if (param2 == "worker") {
+                 if (STORE._storeData.BST) {
+-                    if (param6 != param4 / 12) {
++                    if (param6 != int(param4 / 12)) {
+                         GetFrame(param1, _sprites.worker, param4 / 12, 1);
+                     }
+                     return param4 / 12 + 30;
+                 }
+-                if (param6 != param4 / 12) {
++                if (param6 != int(param4 / 12)) {
+                     GetFrame(param1, _sprites.worker, param4 / 12, 0);
+                 }
+                 return param4 / 12;
+@@ -146,20 +150,20 @@ package {
+                     }
+                     return param4 / 12 + 30;
+                 }
+-                if (param6 != param4 / 12) {
++                if (param6 != int(param4 / 12)) {
+                     GetFrame(param1, _sprites.C9, param4 / 12, 0);
+                 }
+                 return param4 / 12;
+             }
+             if (param2 == "C12") {
+-                if (param6 != param4 * 0.083333333) {
++                if (param6 != int(param4 * 0.083333333)) {
+                     GetFrame(param1, _sprites.C12, param4 * 0.083333333);
+                 }
+                 return param4 * 0.083333333;
+             }
+             if (param2 == "C13") {
+                 if (param3 == "walking") {
+-                    if (param6 != param4 / 12) {
++                    if (param6 != int(param4 / 12)) {
+                         GetFrame(param1, _sprites.C13, param4 / 12);
+                     }
+                     return param4 / 12;
+@@ -203,7 +207,7 @@ package {
+                 return param4 / 12;
+             }
+             if (param2 == "C15") {
+-                if (param6 != param4 / 11.25) {
++                if (param6 != int(param4 / 11.25)) {
+                     GetFrame(param1, _sprites.C15, int(param4 / 11.25));
+                 }
+                 return param4 / 11.25;
+@@ -353,7 +357,7 @@ package {
+                 return param4 / 12;
+             }
+             if (param2 == "rocket") {
+-                if (param6 != param4 / 11.25) {
++                if (param6 != int(param4 / 11.25)) {
+                     GetFrame(param1, _sprites.rocket, param4 / 11.25);
+                 }
+                 return param4 / 11.25;
+@@ -365,7 +369,7 @@ package {
+                 return param4 / 11.25;
+             }
+             if (_sprites[param2]) {
+-                if (param6 != param4 / 12) {
++                if (param6 != int(param4 / 12)) {
+                     GetFrame(param1, _sprites[param2], param4 / 12);
+                 }
+                 return param4 / 12;
+diff --git a/client/scripts/buttonFullscreen.as b/client/scripts/buttonFullscreen.as
+index 428469d3..3a8d9424 100644
+--- a/client/scripts/buttonFullscreen.as
++++ b/client/scripts/buttonFullscreen.as
+@@ -1,4 +1,5 @@
+ package {
++    import com.monsters.configs.WebPlatform;
+     import flash.display.MovieClip;
+     import flash.display.StageDisplayState;
+     import flash.events.MouseEvent;
+@@ -29,7 +30,7 @@ package {
+             this._bubble.y = 20;
+             this._bubble.mcText.autoSize = TextFieldAutoSize.LEFT;
+             this._bubble.mouseChildren = this._bubble.mouseEnabled = false;
+-            if (GLOBAL._ROOT.stage.displayState == StageDisplayState.FULL_SCREEN || GLOBAL._ROOT.stage.displayState == StageDisplayState.FULL_SCREEN_INTERACTIVE) {
++            if (WebPlatform.isWeb ? WebPlatform.isFullscreen : GLOBAL._ROOT.stage.displayState == StageDisplayState.FULL_SCREEN || GLOBAL._ROOT.stage.displayState == StageDisplayState.FULL_SCREEN_INTERACTIVE) {
+                 this._bubble.mcText.htmlText = "<b>" + KEYS.Get("settings_fullscreenexit") + "</b>";
+             }
+             else {
+diff --git a/client/scripts/com/monsters/chat/impl/ws/BrowserWebSocket.as b/client/scripts/com/monsters/chat/impl/ws/BrowserWebSocket.as
+new file mode 100644
+index 00000000..fa3a9173
+--- /dev/null
++++ b/client/scripts/com/monsters/chat/impl/ws/BrowserWebSocket.as
+@@ -0,0 +1,102 @@
++package com.monsters.chat.impl.ws {
++    import com.worlize.websocket.WebSocketErrorEvent;
++    import com.worlize.websocket.WebSocketEvent;
++    import com.worlize.websocket.WebSocketMessage;
++    import flash.events.EventDispatcher;
++    import flash.external.ExternalInterface;
++
++    /**
++     * A WebSocket opened by the page hosting the browser build, through ExternalInterface.
++     *
++     * Ruffle cannot open the raw TCP socket that com.worlize.websocket.WebSocket is built on, so
++     * the browser build hands the connection to the browser's own WebSocket instead. The page
++     * defines bymrSocket.open/send/close and reports back through the bymrSocketEvent callback.
++     */
++    public class BrowserWebSocket extends EventDispatcher implements IChatSocket {
++
++        private static var _sockets:Object = {};
++
++        private static var _nextId:int = 1;
++
++        private static var _callbackAdded:Boolean = false;
++
++        private var _id:int;
++
++        private var _host:String;
++
++        private var _port:int;
++
++        private var _opened:Boolean = false;
++
++        /**
++         * @param host The chat server host.
++         * @param port The chat server port.
++         */
++        public function BrowserWebSocket(host:String, port:int) {
++            super();
++            _id = _nextId++;
++            _host = host;
++            _port = port;
++        }
++
++        public function connect():void {
++            if (!ExternalInterface.available) {
++                dispatchEvent(new WebSocketErrorEvent(WebSocketErrorEvent.CONNECTION_FAIL, false, false, "ExternalInterface unavailable"));
++                return;
++            }
++            if (!_callbackAdded) {
++                ExternalInterface.addCallback("bymrSocketEvent", onSocketEvent);
++                _callbackAdded = true;
++            }
++            _sockets[_id] = this;
++            ExternalInterface.call("bymrSocket.open", _id, _host, _port);
++        }
++
++        public function sendUTF(data:String):void {
++            ExternalInterface.call("bymrSocket.send", _id, data);
++        }
++
++        public function close(waitForServer:Boolean = true):void {
++            delete _sockets[_id];
++            ExternalInterface.call("bymrSocket.close", _id);
++        }
++
++        /**
++         * Receives every socket event from the page and forwards it to the socket it belongs to.
++         *
++         * @param id The socket id passed to bymrSocket.open.
++         * @param type One of open, message, error or close.
++         * @param data The message text for message events, otherwise a reason (may be empty).
++         */
++        private static function onSocketEvent(id:int, type:String, data:String):void {
++            var socket:BrowserWebSocket = _sockets[id] as BrowserWebSocket;
++            if (socket) {
++                socket.handleEvent(type, data);
++            }
++        }
++
++        private function handleEvent(type:String, data:String):void {
++            var event:WebSocketEvent;
++            switch (type) {
++                case "open":
++                    _opened = true;
++                    dispatchEvent(new WebSocketEvent(WebSocketEvent.OPEN));
++                    break;
++                case "message":
++                    event = new WebSocketEvent(WebSocketEvent.MESSAGE);
++                    event.message = new WebSocketMessage();
++                    event.message.type = WebSocketMessage.TYPE_UTF8;
++                    event.message.utf8Data = data;
++                    dispatchEvent(event);
++                    break;
++                case "error":
++                    dispatchEvent(new WebSocketErrorEvent(_opened ? WebSocketErrorEvent.ABNORMAL_CLOSE : WebSocketErrorEvent.CONNECTION_FAIL, false, false, data));
++                    break;
++                case "close":
++                    delete _sockets[_id];
++                    dispatchEvent(new WebSocketEvent(WebSocketEvent.CLOSED));
++                    break;
++            }
++        }
++    }
++}
+diff --git a/client/scripts/com/monsters/chat/impl/ws/IChatSocket.as b/client/scripts/com/monsters/chat/impl/ws/IChatSocket.as
+new file mode 100644
+index 00000000..28ba8988
+--- /dev/null
++++ b/client/scripts/com/monsters/chat/impl/ws/IChatSocket.as
+@@ -0,0 +1,16 @@
++package com.monsters.chat.impl.ws {
++    import flash.events.IEventDispatcher;
++
++    /**
++     * The part of a WebSocket that WSChatSystem uses. Implementations dispatch
++     * com.worlize.websocket.WebSocketEvent and WebSocketErrorEvent.
++     */
++    public interface IChatSocket extends IEventDispatcher {
++
++        function connect():void;
++
++        function sendUTF(data:String):void;
++
++        function close(waitForServer:Boolean = true):void;
++    }
++}
+diff --git a/client/scripts/com/monsters/chat/impl/ws/WSChatSystem.as b/client/scripts/com/monsters/chat/impl/ws/WSChatSystem.as
+index 7941241f..748ab46a 100644
+--- a/client/scripts/com/monsters/chat/impl/ws/WSChatSystem.as
++++ b/client/scripts/com/monsters/chat/impl/ws/WSChatSystem.as
+@@ -7,6 +7,7 @@ package com.monsters.chat.impl.ws {
+     import com.monsters.chat.ChatUser;
+     import com.monsters.chat.IAuthenticationSystem;
+     import com.monsters.chat.IChatSystem;
++    import com.monsters.configs.WebPlatform;
+     import com.worlize.websocket.WebSocket;
+     import com.worlize.websocket.WebSocketErrorEvent;
+     import com.worlize.websocket.WebSocketEvent;
+@@ -16,7 +17,7 @@ package com.monsters.chat.impl.ws {
+     import flash.utils.Timer;
+ 
+     public class WSChatSystem extends EventDispatcher implements IChatSystem {
+-        private var _ws:WebSocket;
++        private var _ws:IChatSocket;
+         private var _host:String;
+         private var _port:int;
+         private var _connected:Boolean = false;
+@@ -37,7 +38,12 @@ package com.monsters.chat.impl.ws {
+         // ── IChatSystem: Connection ───────────────────────────────────────────
+ 
+         public function connect():Boolean {
+-            _ws = new WebSocket("ws://" + _host + ":" + _port + "/", "http://" + _host);
++            if (WebPlatform.isWeb) {
++                _ws = new BrowserWebSocket(_host, _port);
++            }
++            else {
++                _ws = new WebSocket("ws://" + _host + ":" + _port + "/", "http://" + _host);
++            }
+             _ws.addEventListener(WebSocketEvent.OPEN, onWsOpen);
+             _ws.addEventListener(WebSocketEvent.MESSAGE, onWsMessage);
+             _ws.addEventListener(WebSocketEvent.CLOSED, onWsClose);
+diff --git a/client/scripts/com/monsters/configs/BYMConfig.as b/client/scripts/com/monsters/configs/BYMConfig.as
+index 0efc57e4..04718e54 100644
+--- a/client/scripts/com/monsters/configs/BYMConfig.as
++++ b/client/scripts/com/monsters/configs/BYMConfig.as
+@@ -47,7 +47,8 @@ package com.monsters.configs {
+             // Apparently, it is more performant to have this enabled
+             // RENDERER_ON true = graphics are rendered using a bitmap approach
+             // RENDERER_ON false = graphics are rendered using a vector approach / display list approach
+-            return true;
++            // The browser build draws through the display list instead, see WebPlatform.useDisplayList
++            return !WebPlatform.useDisplayList;
+         }
+ 
+         public function get OPTIMIZED_SHADOWS():Boolean {
+diff --git a/client/scripts/com/monsters/configs/WebPlatform.as b/client/scripts/com/monsters/configs/WebPlatform.as
+new file mode 100644
+index 00000000..afd5b0fa
+--- /dev/null
++++ b/client/scripts/com/monsters/configs/WebPlatform.as
+@@ -0,0 +1,60 @@
++package com.monsters.configs {
++    import flash.external.ExternalInterface;
++
++    /**
++     * Options for the browser build of the client, which runs on Ruffle inside the PWA shell
++     * served from server/public/play/.
++     *
++     * The shell passes these in as flashvars. When the client is loaded by the desktop launcher
++     * none of them are present and every option keeps its launcher default.
++     */
++    public class WebPlatform {
++
++        /** True when the client was started by the PWA shell (flashvar platform=web). */
++        public static var isWeb:Boolean = false;
++
++        /**
++         * Draw the map through the display list instead of blitting everything into one BitmapData.
++         * Ruffle draws on the GPU, so the blitting renderer's mix of draw() and copyPixels() forces a
++         * GPU readback for every entry, every frame. Defaults to on for the browser build and can be
++         * forced with the flashvar renderer=displaylist or renderer=bitmap.
++         */
++        public static var useDisplayList:Boolean = false;
++
++        /** Whether the page is fullscreen (the stage's displayState always reads normal). */
++        public static function get isFullscreen():Boolean {
++            return ExternalInterface.available && ExternalInterface.call("bymrFullscreen.active") == true;
++        }
++
++        /**
++         * Enters or leaves fullscreen. The page does this itself: Flash's fullscreen would only
++         * enlarge the player, outside the page's scaling.
++         */
++        public static function toggleFullscreen():void {
++            if (ExternalInterface.available) {
++                ExternalInterface.call("bymrFullscreen.toggle");
++            }
++        }
++
++        /**
++         * Reads the web options from the SWF's flashvars. Must run before anything reads
++         * BYMConfig.RENDERER_ON, as the map picks its renderer when it is first built.
++         *
++         * @param params The loaderInfo.parameters object of the root SWF.
++         */
++        public static function init(params:Object):void {
++            if (!params) {
++                return;
++            }
++            isWeb = params.platform == "web";
++            useDisplayList = isWeb;
++
++            if (params.renderer == "displaylist") {
++                useDisplayList = true;
++            }
++            else if (params.renderer == "bitmap") {
++                useDisplayList = false;
++            }
++        }
++    }
++}
+diff --git a/client/scripts/com/monsters/display/BuildingOverlay.as b/client/scripts/com/monsters/display/BuildingOverlay.as
+index ec15562d..01b11f84 100644
+--- a/client/scripts/com/monsters/display/BuildingOverlay.as
++++ b/client/scripts/com/monsters/display/BuildingOverlay.as
+@@ -81,12 +81,15 @@ package com.monsters.display {
+             _loc2_ = _loc3_.addChild(new Bitmap(_buildings[param1._id].bmdtext));
+             _loc2_.x = -26 + _loc4_.x + (51 - labelWidth) * 0.5;
+             _loc2_.y = -32 + _loc4_.y;
++            _buildings[param1._id].bmptext = _loc2_;
+             _loc2_ = _loc3_.addChild(new Bitmap(_buildings[param1._id].bmdprogress));
+             _loc2_.x = -26 + _loc4_.x;
+             _loc2_.y = -20 + _loc4_.y;
++            _buildings[param1._id].bmpprogress = _loc2_;
+             _loc2_ = _loc3_.addChild(new Bitmap(_buildings[param1._id].bmdhp));
+             _loc2_.x = -26 + _loc4_.x;
+             _loc2_.y = -14 + _loc4_.y;
++            _buildings[param1._id].bmphp = _loc2_;
+             if (!BYMConfig.instance.RENDERER_ON) {
+                 param1._mc.addChild(_loc3_);
+             }
+@@ -212,6 +215,19 @@ package com.monsters.display {
+                     _loc5_ = _loc8_.bmdhp;
+                     _loc5_.fillRect(_loc5_.rect, 0);
+                 }
++                updateVisibility(_loc8_);
++            }
++        }
++
++        /**
++         * Each bitmap is fully transparent unless it shows something, and most buildings show
++         * nothing most of the time. Hidden, they cost nothing to draw on GPU renderers.
++         */
++        private static function updateVisibility(param1:Object):void {
++            if (param1.bmptext) {
++                param1.bmptext.visible = param1.indextext != "";
++                param1.bmpprogress.visible = param1.indexprogress != -1;
++                param1.bmphp.visible = param1.indexhp != -1;
+             }
+         }
+ 
+diff --git a/client/scripts/com/monsters/effects/StampCache.as b/client/scripts/com/monsters/effects/StampCache.as
+new file mode 100644
+index 00000000..ffe4bcd0
+--- /dev/null
++++ b/client/scripts/com/monsters/effects/StampCache.as
+@@ -0,0 +1,78 @@
++package com.monsters.effects {
++    import flash.display.BitmapData;
++    import flash.display.IBitmapDrawable;
++    import flash.geom.Matrix;
++    import flash.geom.Point;
++    import flash.geom.Rectangle;
++
++    /**
++     * Rasterised copies of the vector effects (blood splats, dirt particles) that get stamped
++     * onto the map's effects layer.
++     *
++     * The browser build runs on Ruffle, which draws vector art into a BitmapData on the GPU.
++     * Copying that into the effects layer, which lives on the CPU, then reads it back from the
++     * GPU and stalls rendering, once for every splat. Instead each variant is rasterised once,
++     * ideally ahead of time on one sheet so that they all come back in a single readback, and
++     * then reused.
++     */
++    public class StampCache {
++
++        private static var _stamps:Object = {};
++
++        /**
++         * @param key Identifies the variant; the same key must always describe the same image.
++         * @param width Width of the stamp.
++         * @param height Height of the stamp.
++         * @param source What to draw, already showing the right frame.
++         * @param matrix How to draw it into the stamp.
++         * @return The stamp, drawn on first use.
++         */
++        public static function Get(key:String, width:int, height:int, source:IBitmapDrawable, matrix:Matrix):BitmapData {
++            var stamp:BitmapData = _stamps[key];
++            if (!stamp) {
++                stamp = new BitmapData(width, height, true, 0);
++                stamp.draw(source, matrix);
++                Download(stamp);
++                _stamps[key] = stamp;
++            }
++            return stamp;
++        }
++
++        public static function Has(key:String):Boolean {
++            return _stamps[key] != null;
++        }
++
++        /**
++         * Adds a sheet of equally sized stamps, laid out left to right and top to bottom in the
++         * order of their keys.
++         */
++        public static function AddSheet(sheet:BitmapData, keys:Array, width:int, height:int):void {
++            var columns:int = sheet.width / width;
++            var stamp:BitmapData = null;
++            var i:int = 0;
++            Download(sheet);
++            while (i < keys.length) {
++                stamp = new BitmapData(width, height, true, 0);
++                stamp.copyPixels(sheet, new Rectangle(i % columns * width, int(i / columns) * height, width, height), new Point());
++                _stamps[keys[i]] = stamp;
++                i++;
++            }
++            sheet.dispose();
++        }
++
++        /**
++         * Brings the pixels to the CPU now, where every later use reads them. Reading a single pixel
++         * is not enough: only a read inside the drawn area waits for the GPU.
++         */
++        private static function Download(bitmap:BitmapData):void {
++            bitmap.getPixels(bitmap.rect);
++        }
++
++        /**
++         * Scales are quantised so that a handful of stamps cover the continuous range used.
++         */
++        public static function Quantise(value:Number, step:Number):Number {
++            return Math.round(value / step) * step;
++        }
++    }
++}
+diff --git a/client/scripts/com/monsters/effects/particles/Particles.as b/client/scripts/com/monsters/effects/particles/Particles.as
+index 3799b1bd..3662701e 100644
+--- a/client/scripts/com/monsters/effects/particles/Particles.as
++++ b/client/scripts/com/monsters/effects/particles/Particles.as
+@@ -1,4 +1,6 @@
+ package com.monsters.effects.particles {
++    import com.monsters.configs.WebPlatform;
++    import com.monsters.effects.StampCache;
+     import flash.display.BitmapData;
+     import flash.geom.Matrix;
+     import flash.geom.Point;
+@@ -99,6 +101,31 @@ package com.monsters.effects.particles {
+             }
+         }
+ 
++        /**
++         * Rasterises the settled particles at every quantised scale in use (see
++         * EFFECTS.PrepareStamps).
++         */
++        public static function PrepareStamps():void {
++            var keys:Array = [];
++            var sheet:BitmapData = new BitmapData(26 * 21, 26 * 3, true, 0);
++            var particle:ParticlesObject = new ParticlesObject();
++            var frame:int = 1;
++            var step:int = 0;
++            var scale:Number = NaN;
++            while (frame <= 3) {
++                particle.gotoAndStop(frame);
++                step = 10;
++                while (step <= 30) {
++                    scale = StampCache.Quantise(step / 20, 0.05);
++                    sheet.draw(particle, new Matrix(scale, 0, 0, scale, keys.length % 21 * 26 + 13, int(keys.length / 21) * 26 + 13));
++                    keys.push("dot" + frame + "@" + scale);
++                    step++;
++                }
++                frame++;
++            }
++            StampCache.AddSheet(sheet, keys, 26, 26);
++        }
++
+         public static function SnapShot(param1:int, param2:int, param3:Number, param4:ParticlesObject):void {
+             var _loc5_:BitmapData = null;
+             var _loc6_:Matrix = null;
+@@ -108,11 +135,21 @@ package com.monsters.effects.particles {
+                 _loc6_ = new Matrix();
+                 _loc7_ = 26;
+                 _loc8_ = 26;
+-                _loc5_ = new BitmapData(_loc7_, _loc8_, true, 0);
+-                _loc6_.scale(param3, param3);
+-                _loc6_.tx = _loc7_ * 0.5;
+-                _loc6_.ty = _loc8_ * 0.5;
+-                _loc5_.draw(param4, _loc6_);
++                if (WebPlatform.isWeb) {
++                    // A settled particle always looks the same apart from its scale; see StampCache.
++                    param3 = StampCache.Quantise(Math.max(0.5, Math.min(param3, 1.5)), 0.05);
++                    _loc6_.scale(param3, param3);
++                    _loc6_.tx = _loc7_ * 0.5;
++                    _loc6_.ty = _loc8_ * 0.5;
++                    _loc5_ = StampCache.Get("dot" + param4.currentFrame + "@" + param3, _loc7_, _loc8_, param4, _loc6_);
++                }
++                else {
++                    _loc5_ = new BitmapData(_loc7_, _loc8_, true, 0);
++                    _loc6_.scale(param3, param3);
++                    _loc6_.tx = _loc7_ * 0.5;
++                    _loc6_.ty = _loc8_ * 0.5;
++                    _loc5_.draw(param4, _loc6_);
++                }
+                 MAP.effectsBMD.copyPixels(_loc5_, new Rectangle(0, 0, _loc7_, _loc8_), new Point(param1 + MAP.effectsBMD.width * 0.5 - _loc7_ / 2, param2 + MAP.effectsBMD.height * 0.5 - _loc8_ * 0.5), null, null, true);
+             }
+             catch (e:Error) {
+diff --git a/client/scripts/com/monsters/missions/MISSIONS_ITEM.as b/client/scripts/com/monsters/missions/MISSIONS_ITEM.as
+index 5ffb02ab..37abb7cc 100644
+--- a/client/scripts/com/monsters/missions/MISSIONS_ITEM.as
++++ b/client/scripts/com/monsters/missions/MISSIONS_ITEM.as
+@@ -1,4 +1,5 @@
+ package com.monsters.missions {
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.display.ImageCache;
+     import flash.display.Bitmap;
+     import flash.display.BitmapData;
+@@ -51,6 +52,11 @@ package com.monsters.missions {
+                 ImageLoaded = function(param1:String, param2:BitmapData):void {
+                     try {
+                         mcImage.addChild(new Bitmap(param2));
++                        if (WebPlatform.isWeb && mcLoading && mcLoading.parent) {
++                            // The spinner under the icon would otherwise keep turning, which
++                            // makes the browser build redraw the whole quest list every frame.
++                            mcLoading.parent.removeChild(mcLoading);
++                        }
+                     }
+                     catch (e:Error) {
+                     }
+diff --git a/client/scripts/com/monsters/monsters/MonsterBase.as b/client/scripts/com/monsters/monsters/MonsterBase.as
+index e3782b6d..70b408b7 100644
+--- a/client/scripts/com/monsters/monsters/MonsterBase.as
++++ b/client/scripts/com/monsters/monsters/MonsterBase.as
+@@ -2,6 +2,7 @@ package com.monsters.monsters {
+     import com.cc.utils.SecNum;
+     import com.monsters.GameObject;
+     import com.monsters.configs.BYMConfig;
++    import com.monsters.configs.WebPlatform;
+     import com.monsters.interfaces.IAttackable;
+     import com.monsters.interfaces.ILootable;
+     import com.monsters.interfaces.ITargetable;
+@@ -157,6 +158,8 @@ package com.monsters.monsters {
+ 
+         public var _lastRotation:int = 400;
+ 
++        private var _healthBarDrawn:Boolean = false;
++
+         public var _targetGroup:int;
+ 
+         public var targetMode:int;
+@@ -384,6 +387,7 @@ package com.monsters.monsters {
+                 if (_loc5_ >= maxHealth) {
+                     if (this._graphic) {
+                         this._graphic.fillRect(this._graphic.rect, 0);
++                        this.redrawSprite();
+                     }
+                     param1 = maxHealth - health;
+                 }
+@@ -584,6 +588,12 @@ package com.monsters.monsters {
+             var _loc2_:String = null;
+             var _loc3_:int = 0;
+             var _loc4_:int = 0;
++            // The game ticks creatures several times per displayed frame and only the last tick
++            // (GLOBAL._render) is drawn. Sprites aren't fetched on the other ticks, which also
++            // forgets the current frame (_lastFrame) and made every creature recopy its sprite
++            // every frame. On the browser build, whose bitmaps go to the GPU after every change,
++            // the drawing work is only done on the drawn tick.
++            var draw:Boolean = GLOBAL._render || !WebPlatform.isWeb;
+             if (!GLOBAL._catchup) {
+                 if (!this._lockRotation) {
+                     // Only calculate rotation when movement direction changes
+@@ -611,14 +621,14 @@ package com.monsters.monsters {
+                     this.m_rotation += 360;
+                 }
+                 this.m_rotation %= 360;
+-                if (x != int(this._tmpPoint.x) || y != int(this._tmpPoint.y)) {
++                if (draw && (x != int(this._tmpPoint.x) || y != int(this._tmpPoint.y))) {
+                     graphic.x = int(this._tmpPoint.x);
+                     graphic.y = int(this._tmpPoint.y);
+                 }
+-                if (this._graphic) {
++                if (this._graphic && draw) {
+                     this._graphic.lock();
+                 }
+-                if (this._shadow) {
++                if (this._shadow && draw) {
+                     this._shadow.lock();
+                 }
+                 _loc3_ = 0;
+@@ -634,8 +644,16 @@ package com.monsters.monsters {
+                         graphic.alpha = 1;
+                     }
+                 }
++                if (!draw) {
++                    return;
++                }
++                if (this._healthBarDrawn && health >= maxHealth) {
++                    // The health bar is drawn over the sprite; draw the sprite again to clear it.
++                    this.redrawSprite();
++                }
+                 this.getNextSprite();
+                 this._lastRotation = int(this.m_rotation / 12);
++                this._healthBarDrawn = health < maxHealth;
+                 if (health < maxHealth) {
+                     _loc4_ = 11 - int(11 / maxHealth * health);
+                     this._graphic.copyPixels(CREEPS._bmdHPbar, new Rectangle(0, 5 * _loc4_, 17, 5), new Point(-this._graphicMC.x - CREEPS._bmdHPbar.width / 2, 6));
+@@ -653,6 +671,12 @@ package com.monsters.monsters {
+         protected function getNextSprite():void {
+         }
+ 
++        /**
++         * Makes the next getNextSprite() draw the sprite even if its frame hasn't changed.
++         */
++        protected function redrawSprite():void {
++        }
++
+         protected function renderBurrow():void {
+             if (this._speed > 0 && (this._behaviour === k_sBHVR_ATTACK || this._doDefenseBurrow)) {
+                 if (this._phase != 1) {
+diff --git a/client/scripts/com/monsters/monsters/creeps/CreepBase.as b/client/scripts/com/monsters/monsters/creeps/CreepBase.as
+index ba08b6e6..346ec083 100644
+--- a/client/scripts/com/monsters/monsters/creeps/CreepBase.as
++++ b/client/scripts/com/monsters/monsters/creeps/CreepBase.as
+@@ -1706,6 +1706,10 @@ package com.monsters.monsters.creeps {
+             }
+         }
+ 
++        override protected function redrawSprite():void {
++            this._lastFrame = -1;
++        }
++
+         override protected function getNextSprite():void {
+             if (_creatureID == "IC5" && _movement == "fly" || _movement == "fly_low") {
+                 SPRITES.GetSprite(_shadow, "shadow", "shadow", 0);
+diff --git a/client/scripts/com/worlize/websocket/WebSocket.as b/client/scripts/com/worlize/websocket/WebSocket.as
+index 9bdd6961..c3ba916f 100644
+--- a/client/scripts/com/worlize/websocket/WebSocket.as
++++ b/client/scripts/com/worlize/websocket/WebSocket.as
+@@ -15,6 +15,7 @@
+  ***********************************************************************/
+ 
+ package com.worlize.websocket {
++    import com.monsters.chat.impl.ws.IChatSocket;
+     import com.adobe.net.URI;
+     import com.adobe.net.URIEncodingBitmap;
+     import com.adobe.utils.StringUtil;
+@@ -48,7 +49,7 @@ package com.worlize.websocket {
+     [Event(name="pong", type="com.worlize.websocket.WebSocketEvent")]
+     [Event(name="open", type="com.worlize.websocket.WebSocketEvent")]
+     [Event(name="closed", type="com.worlize.websocket.WebSocketEvent")]
+-    public class WebSocket extends EventDispatcher {
++    public class WebSocket extends EventDispatcher implements IChatSocket {
+         private static const MODE_UTF8:int = 0;
+         private static const MODE_BINARY:int = 0;
+ 

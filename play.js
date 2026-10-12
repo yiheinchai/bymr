@@ -122,9 +122,27 @@
     if (!input.url.startsWith(apiUrl) && input.url !== initUrl) return response;
     if ((input.headers.get("content-type") || "").includes("json")) return response;
     if (!(response.headers.get("content-type") || "").includes("json")) return response;
-    const body = await response.text();
+    let body = await response.text();
+    if (input.url === initUrl) body = webVersionMessage(body);
     return new Response(body, { status: 200, headers: response.headers });
   };
+
+  /**
+   * The server tells an outdated client to visit the launcher's downloads page. On the web the
+   * site itself is rebuilt for a new release (see the deployment's README), so say that instead.
+   */
+  function webVersionMessage(body) {
+    try {
+      const data = JSON.parse(body);
+      if (!data.versionMismatch) return body;
+      data.error =
+        "The game servers have just been updated. This site updates itself to the new version, " +
+        "usually within a few hours. Please try again later.";
+      return JSON.stringify(data);
+    } catch {
+      return body;
+    }
+  }
 
   /** Chat sockets, opened on behalf of com.monsters.chat.impl.ws.BrowserWebSocket. */
   const sockets = new Map();

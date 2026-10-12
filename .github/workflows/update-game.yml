@@ -1,0 +1,37 @@
+name: Update the game
+
+# The official servers turn away an outdated client, so rebuild the game whenever there is a
+# new release they accept. See build/update.sh.
+on:
+  schedule:
+    - cron: "23 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+concurrency:
+  group: update-game
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: build
+        run: build/update.sh
+
+      - if: steps.build.outputs.updated
+        env:
+          VERSION: ${{ steps.build.outputs.updated }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bymr.swf build/client-version README.md
+          git commit -m "Update the game to $VERSION"
+          git push
+          # Pushes made with this token may not start a Pages build on their own.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" || true
