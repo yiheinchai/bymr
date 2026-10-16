@@ -5,7 +5,7 @@ screen" for a full-screen app.
 
 This is a static build of the browser client from
 [yiheinchai/backyard-monsters-refitted](https://github.com/yiheinchai/backyard-monsters-refitted)
-(`pwa/` there explains how it works): the game client (`bymr.swf`, release v1.7.9-beta with the
+(`pwa/` there explains how it works): the game client (`bymr.swf`, release v1.8.0-beta with the
 browser changes) running in a patched build of [Ruffle](https://ruffle.rs). It plays on the official
 Backyard Monsters Refitted servers, so sign in with your Backyard Monsters Refitted account.
 
