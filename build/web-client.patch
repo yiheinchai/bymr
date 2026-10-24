@@ -1,5 +1,5 @@
 diff --git a/client/scripts/BFOUNDATION.as b/client/scripts/BFOUNDATION.as
-index 53afa9e2..da76a6cf 100644
+index d84466fd..ad9e12f4 100644
 --- a/client/scripts/BFOUNDATION.as
 +++ b/client/scripts/BFOUNDATION.as
 @@ -3,6 +3,7 @@ package {
@@ -10,7 +10,7 @@ index 53afa9e2..da76a6cf 100644
      import com.monsters.debug.Console;
      import com.monsters.display.BuildingAssetContainer;
      import com.monsters.display.BuildingOverlay;
-@@ -1578,6 +1579,22 @@ package {
+@@ -1580,6 +1581,22 @@ package {
              }
          }
  
@@ -33,7 +33,7 @@ index 53afa9e2..da76a6cf 100644
          public function Cancel():void {
              if (GLOBAL._newBuilding === this) {
                  this.clear();
-@@ -1632,6 +1649,9 @@ package {
+@@ -1634,6 +1651,9 @@ package {
              var e:MouseEvent = param1;
              this.Description();
              if (!MAP._dragged) {
@@ -43,7 +43,7 @@ index 53afa9e2..da76a6cf 100644
                  if (BASE.BuildBlockers(this, this._class == "decoration") != "") {
                      this.Cancel();
                      return;
-@@ -2773,6 +2793,11 @@ package {
+@@ -2775,6 +2795,11 @@ package {
                  }
                  this._oldPosition = new Point(_mc.x, _mc.y);
                  this._mouseOffset = new Point(MAP._GROUND.mouseX - _mc.x, MAP._GROUND.mouseY - _mc.y);
@@ -55,7 +55,7 @@ index 53afa9e2..da76a6cf 100644
              }
              catch (e:Error) {
                  LOGGER.Log("err", "BFOUNDATION.StartMove: " + e.getStackTrace());
-@@ -2784,6 +2809,10 @@ package {
+@@ -2786,6 +2811,10 @@ package {
              if (this._mouseClicked) {
                  this._mouseClicked = false;
                  if (!MAP._dragged) {
@@ -115,7 +115,7 @@ index 2273714b..4caee320 100644
  
          public function get isOverTarget():Boolean {
 diff --git a/client/scripts/EFFECTS.as b/client/scripts/EFFECTS.as
-index 0ce224d2..c49ed3ab 100644
+index 4f526855..a312f34a 100644
 --- a/client/scripts/EFFECTS.as
 +++ b/client/scripts/EFFECTS.as
 @@ -2,6 +2,8 @@ package {
@@ -204,7 +204,7 @@ index 0ce224d2..c49ed3ab 100644
                      _loc10_ = 100;
                      _loc6_ = new BitmapData(100, 100, true, 0);
 diff --git a/client/scripts/GAME.as b/client/scripts/GAME.as
-index 68faf734..5a63cafe 100644
+index ec0b6273..feb52210 100644
 --- a/client/scripts/GAME.as
 +++ b/client/scripts/GAME.as
 @@ -12,6 +12,7 @@ package {
@@ -224,8 +224,8 @@ index 68faf734..5a63cafe 100644
              // Override server URL if provided as a flash var
              var flashVarServerUrl:* = loaderInfo.parameters["serverUrl"];
  
-@@ -42,13 +45,21 @@ package {
-                 GLOBAL.serverUrl = String(flashVarServerUrl);
+@@ -49,13 +52,21 @@ package {
+                 GLOBAL.cdnUrl = String(flashVarCdnUrl);
              }
  
 +            // Likewise for the CDN, so the browser build can be served from any host
@@ -248,7 +248,7 @@ index 68faf734..5a63cafe 100644
              if (this.parent) {
                  urls = {};
 diff --git a/client/scripts/GLOBAL.as b/client/scripts/GLOBAL.as
-index 68ada594..f5a67f3c 100644
+index 66737d61..080025d3 100644
 --- a/client/scripts/GLOBAL.as
 +++ b/client/scripts/GLOBAL.as
 @@ -6,6 +6,7 @@ package {
@@ -259,7 +259,7 @@ index 68ada594..f5a67f3c 100644
      import com.monsters.debug.Console;
      import com.monsters.display.ImageCache;
      import com.monsters.effects.fire.Fire;
-@@ -999,6 +1000,10 @@ package {
+@@ -1008,6 +1009,10 @@ package {
          }
  
          public static function goFullScreen(param1:MouseEvent = null):void {
@@ -368,7 +368,7 @@ index bddc22a7..a9817b94 100644
                  };
                  new URLLoaderApi().load(GLOBAL._apiURL + "player/getinfo", [["version", GLOBAL._version.Get()]].concat(authInfo), handleLoadSuccessful, handleLoadError);
 diff --git a/client/scripts/MAP.as b/client/scripts/MAP.as
-index f3f585d0..05197930 100644
+index ecafff61..31017031 100644
 --- a/client/scripts/MAP.as
 +++ b/client/scripts/MAP.as
 @@ -1,5 +1,6 @@
@@ -376,25 +376,25 @@ index f3f585d0..05197930 100644
      import com.monsters.configs.BYMConfig;
 +    import com.monsters.configs.WebPlatform;
      import com.monsters.input.KeyboardInputHandler;
+     import com.monsters.maproom_manager.MapRoomManager;
      import com.monsters.monsters.MonsterBase;
-     import com.monsters.rendering.RasterData;
-@@ -10,6 +11,7 @@ package {
-     import flash.display.MovieClip;
+@@ -13,6 +14,7 @@ package {
+     import flash.display.Shape;
      import flash.display.Sprite;
      import flash.display.Stage;
 +    import flash.utils.Dictionary;
      import flash.events.*;
      import flash.geom.*;
-     import gs.*;
-@@ -231,6 +233,7 @@ package {
-                 GLOBAL._ROOT.addEventListener(Event.RENDER, this.render);
+     import flash.utils.Timer;
+@@ -269,6 +271,7 @@ package {
+                 this._presentationTimer.start();
              }
              Targeting.init();
 +            EFFECTS.PrepareStamps();
              _inited = true;
          }
  
-@@ -393,12 +396,21 @@ package {
+@@ -492,12 +495,21 @@ package {
              }
          }
  
@@ -416,7 +416,7 @@ index f3f585d0..05197930 100644
              var _loc4_:Array = [];
              var _loc5_:int = _BUILDINGTOPS.numChildren - 1;
              while (_loc5_ >= 0) {
-@@ -420,6 +432,42 @@ package {
+@@ -519,6 +531,42 @@ package {
              }
          }
  
@@ -803,10 +803,10 @@ index 00000000..afd5b0fa
 +    }
 +}
 diff --git a/client/scripts/com/monsters/display/BuildingOverlay.as b/client/scripts/com/monsters/display/BuildingOverlay.as
-index ec15562d..01b11f84 100644
+index ca33f0e2..18d5acb2 100644
 --- a/client/scripts/com/monsters/display/BuildingOverlay.as
 +++ b/client/scripts/com/monsters/display/BuildingOverlay.as
-@@ -81,12 +81,15 @@ package com.monsters.display {
+@@ -82,12 +82,15 @@ package com.monsters.display {
              _loc2_ = _loc3_.addChild(new Bitmap(_buildings[param1._id].bmdtext));
              _loc2_.x = -26 + _loc4_.x + (51 - labelWidth) * 0.5;
              _loc2_.y = -32 + _loc4_.y;
@@ -822,17 +822,17 @@ index ec15562d..01b11f84 100644
              if (!BYMConfig.instance.RENDERER_ON) {
                  param1._mc.addChild(_loc3_);
              }
-@@ -212,6 +215,19 @@ package com.monsters.display {
-                     _loc5_ = _loc8_.bmdhp;
-                     _loc5_.fillRect(_loc5_.rect, 0);
+@@ -214,6 +217,19 @@ package com.monsters.display {
                  }
+                 _loc8_.container.visible = _loc8_.indextext != "" ||
+                     _loc8_.indexprogress != -1 || _loc8_.indexhp != -1;
 +                updateVisibility(_loc8_);
 +            }
 +        }
 +
 +        /**
-+         * Each bitmap is fully transparent unless it shows something, and most buildings show
-+         * nothing most of the time. Hidden, they cost nothing to draw on GPU renderers.
++         * Each bitmap is fully transparent unless it shows something. Hidden, the empty ones cost
++         * nothing to draw on GPU renderers while the others are shown.
 +         */
 +        private static function updateVisibility(param1:Object):void {
 +            if (param1.bmptext) {
@@ -927,7 +927,7 @@ index 00000000..ffe4bcd0
 +    }
 +}
 diff --git a/client/scripts/com/monsters/effects/particles/Particles.as b/client/scripts/com/monsters/effects/particles/Particles.as
-index 3799b1bd..3662701e 100644
+index 09b9a028..0b785c6b 100644
 --- a/client/scripts/com/monsters/effects/particles/Particles.as
 +++ b/client/scripts/com/monsters/effects/particles/Particles.as
 @@ -1,4 +1,6 @@
@@ -993,7 +993,7 @@ index 3799b1bd..3662701e 100644
 +                    _loc6_.ty = _loc8_ * 0.5;
 +                    _loc5_.draw(param4, _loc6_);
 +                }
-                 MAP.effectsBMD.copyPixels(_loc5_, new Rectangle(0, 0, _loc7_, _loc8_), new Point(param1 + MAP.effectsBMD.width * 0.5 - _loc7_ / 2, param2 + MAP.effectsBMD.height * 0.5 - _loc8_ * 0.5), null, null, true);
+                 MAP.copyEffects(_loc5_, new Rectangle(0, 0, _loc7_, _loc8_), new Point(param1 + MAP.effectsBMD.width * 0.5 - _loc7_ / 2, param2 + MAP.effectsBMD.height * 0.5 - _loc8_ * 0.5), null, null, true);
              }
              catch (e:Error) {
 diff --git a/client/scripts/com/monsters/missions/MISSIONS_ITEM.as b/client/scripts/com/monsters/missions/MISSIONS_ITEM.as

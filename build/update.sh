@@ -37,7 +37,8 @@ if [ "$status" != 200 ]; then
 fi
 
 echo "Building $latest"
-git clone -q --filter=blob:none --branch "$latest" "$UPSTREAM" "$WORK/src"
+# Full history: a three-way merge of the patch needs the files it was made against.
+git clone -q --branch "$latest" "$UPSTREAM" "$WORK/src"
 git -C "$WORK/src" apply --3way "$HERE/web-client.patch"
 
 FLEX_HOME="${FLEX_HOME:-$WORK/flex}"
