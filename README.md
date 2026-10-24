@@ -12,7 +12,7 @@ Backyard Monsters Refitted servers, so sign in with your Backyard Monsters Refit
 ## Updates
 
 The official servers turn away an outdated client, so the game here is rebuilt automatically.
-Every three hours, `.github/workflows/update-game.yml` runs `build/update.sh`, which:
+Every 15 minutes, `.github/workflows/update-game.yml` runs `build/update.sh`, which:
 
 1. finds the newest upstream release tag
    ([bym-refitted/backyard-monsters-refitted](https://github.com/bym-refitted/backyard-monsters-refitted));
@@ -21,8 +21,9 @@ Every three hours, `.github/workflows/update-game.yml` runs `build/update.sh`, w
 3. otherwise applies the browser changes (`build/web-client.patch`) to that release, compiles it
    with the Apache Flex SDK, and commits the new `bymr.swf`, which publishes it.
 
-If the patch no longer applies to a new release, the run fails (GitHub emails the repository
-owner) and the current version stays up. To run it straight away, use "Run workflow" on the
+If the patch no longer applies to a new release, the run fails, the current version stays up,
+and the workflow opens an issue here ("The game update is failing"), which it closes again once
+an update run works. To run it straight away, use "Run workflow" on the
 Actions tab. GitHub pauses scheduled workflows in a repository with no activity for 60 days.
 
 `build/web-client.patch` is the client part of the browser changes:

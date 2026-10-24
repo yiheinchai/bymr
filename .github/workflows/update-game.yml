@@ -1,18 +1,23 @@
 name: Update the game
 
 # The official servers turn away an outdated client, so rebuild the game whenever there is a
-# new release they accept. See build/update.sh.
+# new release they accept. See build/update.sh. A check takes a few seconds when there's
+# nothing new, so it runs often to keep the time players are turned away short.
 on:
   schedule:
-    - cron: "23 */3 * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 permissions:
   contents: write
   pages: write
+  issues: write
 
 concurrency:
   group: update-game
+
+env:
+  ISSUE_TITLE: The game update is failing
 
 jobs:
   update:
@@ -35,3 +40,28 @@ jobs:
           git push
           # Pushes made with this token may not start a Pages build on their own.
           gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" || true
+
+      # One open issue while updates fail (not one per run), closed by the next run that works.
+      - if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          open="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[0].number')"
+          if [ -z "$open" ]; then
+            gh issue create --title "$ISSUE_TITLE" --body "The site couldn't be updated to the newest game release, so players may be told to update until it is fixed. Most often the browser changes (build/web-client.patch) no longer apply to the new release and need adjusting.
+
+          Log: $RUN_URL
+
+          This issue closes itself when an update run succeeds."
+          fi
+
+      - if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          open="$(gh issue list --state open --search "in:title \"$ISSUE_TITLE\"" --json number --jq '.[0].number')"
+          if [ -n "$open" ]; then
+            gh issue close "$open" --comment "Updates are working again: $RUN_URL"
+          fi
